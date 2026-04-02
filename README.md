@@ -37,30 +37,30 @@
 ### 搜索和读取
 
 ```bash
-python3 scripts/codex_history.py search --query "payments"
-python3 scripts/codex_history.py show-thread --id <thread-id>
+./codex-history-manager search --query "payments"
+./codex-history-manager show-thread --id <thread-id>
 ```
 
 ### 导出和交接
 
 ```bash
-python3 scripts/codex_history.py export-thread --id <thread-id> --format markdown --output /tmp/thread.md
-python3 scripts/codex_history.py handoff --id <thread-id> --output /tmp/handoff.md
+./codex-history-manager export-thread --id <thread-id> --format markdown --output /tmp/thread.md
+./codex-history-manager handoff --id <thread-id> --output /tmp/handoff.md
 ```
 
 ### workspace 迁移和克隆
 
 ```bash
-python3 scripts/codex_history.py move-workspace --cwd /abs/src --to-cwd /abs/dst --dry-run
-python3 scripts/codex_history.py clone-workspace --cwd /abs/src --to-cwd /abs/dst --dry-run
+./codex-history-manager move-workspace --cwd /abs/src --to-cwd /abs/dst --dry-run
+./codex-history-manager clone-workspace --cwd /abs/src --to-cwd /abs/dst --dry-run
 ```
 
 ### provider 切换
 
 ```bash
-python3 scripts/codex_history.py change-provider --id <thread-id> --provider openai1 --dry-run
-python3 scripts/codex_history.py change-provider-workspace --cwd /abs/path --provider anthropic --dry-run
-python3 scripts/codex_history.py change-provider-all --provider openai1 --dry-run
+./codex-history-manager change-provider --id <thread-id> --provider openai1 --dry-run
+./codex-history-manager change-provider-workspace --cwd /abs/path --provider anthropic --dry-run
+./codex-history-manager change-provider-all --provider openai1 --dry-run
 ```
 
 ## 危险操作
@@ -70,13 +70,13 @@ python3 scripts/codex_history.py change-provider-all --provider openai1 --dry-ru
 1. 先生成计划
 
 ```bash
-python3 scripts/codex_history.py plan-dangerous-edit --id <thread-id> --find "old text" --replace "new text" --output /tmp/edit-plan.json
+./codex-history-manager plan-dangerous-edit --id <thread-id> --find "old text" --replace "new text" --output /tmp/edit-plan.json
 ```
 
 2. 在对话里展示修改清单和警告，获得用户明确批准后再执行
 
 ```bash
-python3 scripts/codex_history.py apply-dangerous-edit --plan /tmp/edit-plan.json --confirm-plan-id <plan-id> --acknowledge-history-rewrite --apply
+./codex-history-manager apply-dangerous-edit --plan /tmp/edit-plan.json --confirm-plan-id <plan-id> --acknowledge-history-rewrite --apply
 ```
 
 这一步会直接改写历史记录内容。它不是 metadata 级修改，而是真正重写已保存的文本。

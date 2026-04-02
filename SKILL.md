@@ -14,7 +14,7 @@ Codex stores local history in two places:
 
 The bundled CLI is the source of truth for reading and mutating that state:
 
-- `python3 scripts/codex_history.py ...`
+- `./codex-history-manager ...`
 
 ## Default workflow
 
@@ -28,29 +28,29 @@ The bundled CLI is the source of truth for reading and mutating that state:
 ## Core commands
 
 - Search threads:
-  `python3 scripts/codex_history.py search --query "payments"`
+  `./codex-history-manager search --query "payments"`
 - Read one thread:
-  `python3 scripts/codex_history.py show-thread --id <thread-id>`
+  `./codex-history-manager show-thread --id <thread-id>`
 - Export transcript:
-  `python3 scripts/codex_history.py export-thread --id <thread-id> --format markdown --output /tmp/thread.md`
+  `./codex-history-manager export-thread --id <thread-id> --format markdown --output /tmp/thread.md`
 - Create a handoff note:
-  `python3 scripts/codex_history.py handoff --id <thread-id> --output /tmp/handoff.md`
+  `./codex-history-manager handoff --id <thread-id> --output /tmp/handoff.md`
 - Plan a dangerous history content rewrite:
-  `python3 scripts/codex_history.py plan-dangerous-edit --id <thread-id> --find "old" --replace "new" --output /tmp/edit-plan.json`
+  `./codex-history-manager plan-dangerous-edit --id <thread-id> --find "old" --replace "new" --output /tmp/edit-plan.json`
 - Clone a thread into another workspace:
-  `python3 scripts/codex_history.py clone-thread --id <thread-id> --to-cwd /abs/path --dry-run`
+  `./codex-history-manager clone-thread --id <thread-id> --to-cwd /abs/path --dry-run`
 - Move all threads in one workspace:
-  `python3 scripts/codex_history.py move-workspace --cwd /abs/src --to-cwd /abs/dst --dry-run`
+  `./codex-history-manager move-workspace --cwd /abs/src --to-cwd /abs/dst --dry-run`
 - Clone all threads in one workspace:
-  `python3 scripts/codex_history.py clone-workspace --cwd /abs/src --to-cwd /abs/dst --dry-run`
+  `./codex-history-manager clone-workspace --cwd /abs/src --to-cwd /abs/dst --dry-run`
 - Move a thread to another workspace:
-  `python3 scripts/codex_history.py move-thread --id <thread-id> --to-cwd /abs/path --dry-run`
+  `./codex-history-manager move-thread --id <thread-id> --to-cwd /abs/path --dry-run`
 - Rebind provider metadata:
-  `python3 scripts/codex_history.py change-provider --id <thread-id> --provider openai1 --dry-run`
+  `./codex-history-manager change-provider --id <thread-id> --provider openai1 --dry-run`
 - Rebind provider metadata for one workspace:
-  `python3 scripts/codex_history.py change-provider-workspace --cwd /abs/path --provider openai1 --dry-run`
+  `./codex-history-manager change-provider-workspace --cwd /abs/path --provider openai1 --dry-run`
 - Rebind provider metadata for all local threads:
-  `python3 scripts/codex_history.py change-provider-all --provider openai1 --dry-run`
+  `./codex-history-manager change-provider-all --provider openai1 --dry-run`
 
 ## Safety rules
 
