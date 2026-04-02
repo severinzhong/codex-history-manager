@@ -1,5 +1,7 @@
 # Codex History Manager
 
+[![CI](https://github.com/severinzhong/codex-history-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/severinzhong/codex-history-manager/actions/workflows/ci.yml)
+
 [中文说明](./README_zh.md)
 
 `codex-history-manager` is a local-first skill and CLI for managing Codex history stored on disk. It can search, read, export, migrate, clone, rebind provider metadata, and perform guarded history rewrites under an explicit high-risk workflow.
@@ -8,6 +10,22 @@ It operates on two local Codex data stores:
 
 - `~/.codex/state_5.sqlite` for thread metadata
 - `~/.codex/sessions/.../rollout-*.jsonl` and `~/.codex/archived_sessions/...` for event logs
+
+## Workflow
+
+```mermaid
+flowchart TD
+    A["Codex local history<br/>SQLite + rollout JSONL"] --> B["Search / Show Thread"]
+    B --> C["Export / Handoff"]
+    B --> D["Move / Clone"]
+    B --> E["Change Provider"]
+    B --> F["Dangerous Edit Plan"]
+    F --> G["User review and explicit approval"]
+    G --> H["Apply dangerous edit"]
+    D --> I["Workspace reuse"]
+    E --> J["Provider rebinding"]
+    C --> K["Archive / agent handoff"]
+```
 
 ## Installation
 
