@@ -1,83 +1,85 @@
 # Codex History Manager
 
-`codex-history-manager` 是一个面向本地 Codex 历史记录的技能和 CLI 工具，用来搜索、读取、导出、迁移、克隆、改 provider，以及在严格确认流程下修改历史内容。
+[中文说明](./README_zh.md)
 
-它操作的是本机 `~/.codex` 下的两类数据：
+`codex-history-manager` is a local-first skill and CLI for managing Codex history stored on disk. It can search, read, export, migrate, clone, rebind provider metadata, and perform guarded history rewrites under an explicit high-risk workflow.
 
-- `state_5.sqlite`：thread 元数据
-- `sessions/.../rollout-*.jsonl` 和 `archived_sessions/...`：会话事件流
+It operates on two local Codex data stores:
 
-## 安装
+- `~/.codex/state_5.sqlite` for thread metadata
+- `~/.codex/sessions/.../rollout-*.jsonl` and `~/.codex/archived_sessions/...` for event logs
 
-直接在仓库目录使用：
+## Installation
+
+Run directly from the repository:
 
 ```bash
 ./codex-history-manager --help
 ```
 
-安装成系统命令：
+Install as a system command:
 
 ```bash
 python3 -m pip install .
 codex-history-manager --help
 ```
 
-或者用 `pipx`：
+Or use `pipx`:
 
 ```bash
 pipx install .
 codex-history-manager --help
 ```
 
-## 能做什么
+## What It Can Do
 
-- 搜索历史 thread
-- 读取单条 thread 的可见对话
-- 导出 thread 为 `markdown`、`json`、`jsonl`
-- 生成 handoff 文档，方便智能体接班
-- 按 thread / workspace / 全部切换 `provider`
-- 按 thread / workspace 迁移或克隆到别的 workspace
-- 在最高危险度流程下改写历史内容
+- Search historical threads
+- Read the visible transcript of a single thread
+- Export a thread as `markdown`, `json`, or `jsonl`
+- Generate handoff documents for agent-to-agent continuation
+- Rebind `provider` by thread, workspace, or across all local threads
+- Move or clone threads by thread or by workspace
+- Rewrite stored history content through an explicit high-risk confirmation flow
 
-## 适合的场景
+## Good Fits
 
-- “我之前在另一个 workspace 聊过这个，帮我找出来”
-- “把这个 thread 复制到新的 workspace 里继续用”
-- “把这个 workspace 下的历史都改到另一个 provider”
-- “导出这条对话做归档或交接”
-- “对历史内容做受控的、安全可审计的修订”
+- “Find the thread where I discussed this in another workspace”
+- “Copy this thread into a new workspace so I can continue there”
+- “Move all threads in this workspace to another provider bucket”
+- “Export this conversation for archiving or handoff”
+- “Make a controlled, auditable correction to stored history”
 
-## 不适合的场景
+## Not a Good Fit
 
-- 网页版 ChatGPT / Claude / Gemini 的远端历史管理
-- 修改 OpenAI/Anthropic 服务端保存的记录
-- 无确认地大批量改写聊天正文
-- 当作数据库修复器，随意手改所有底层字段
+- Managing remote ChatGPT / Claude / Gemini web history
+- Modifying server-side history stored by OpenAI or Anthropic
+- Bulk rewriting chat content without confirmation
+- Acting as a generic database repair tool for arbitrary internal fields
 
-## 常用命令
+## Common Commands
 
-### 搜索和读取
+### Search and Read
 
 ```bash
 ./codex-history-manager search --query "payments"
 ./codex-history-manager show-thread --id <thread-id>
 ```
 
-### 导出和交接
+### Export and Handoff
 
 ```bash
 ./codex-history-manager export-thread --id <thread-id> --format markdown --output /tmp/thread.md
 ./codex-history-manager handoff --id <thread-id> --output /tmp/handoff.md
 ```
 
-### workspace 迁移和克隆
+### Workspace Move and Clone
 
 ```bash
 ./codex-history-manager move-workspace --cwd /abs/src --to-cwd /abs/dst --dry-run
 ./codex-history-manager clone-workspace --cwd /abs/src --to-cwd /abs/dst --dry-run
 ```
 
-### provider 切换
+### Provider Rebinding
 
 ```bash
 ./codex-history-manager change-provider --id <thread-id> --provider openai1 --dry-run
@@ -85,33 +87,33 @@ codex-history-manager --help
 ./codex-history-manager change-provider-all --provider openai1 --dry-run
 ```
 
-## 危险操作
+## Dangerous Operations
 
-这个技能支持“最高危险度”的历史正文改写，但必须走两步：
+This tool supports the highest-risk class of operation: rewriting stored history content. That flow is intentionally two-step.
 
-1. 先生成计划
+1. Generate a plan:
 
 ```bash
 ./codex-history-manager plan-dangerous-edit --id <thread-id> --find "old text" --replace "new text" --output /tmp/edit-plan.json
 ```
 
-2. 在对话里展示修改清单和警告，获得用户明确批准后再执行
+2. Show the warning and exact change list to the user, obtain explicit approval, then apply:
 
 ```bash
 ./codex-history-manager apply-dangerous-edit --plan /tmp/edit-plan.json --confirm-plan-id <plan-id> --acknowledge-history-rewrite --apply
 ```
 
-这一步会直接改写历史记录内容。它不是 metadata 级修改，而是真正重写已保存的文本。
+This rewrites stored history content. It is not a metadata-only change.
 
-## 安全原则
+## Safety Principles
 
-- 写命令默认应该先 `--dry-run`
-- `clone` 通常比 `move` 更安全
-- `change-provider-all` 这种全局操作必须先看作用域统计
-- 每次真实写入前都会自动备份
-- 危险历史改写必须先出计划，再确认，再执行
+- Run write operations as `--dry-run` first
+- Prefer `clone` over `move` when you want reversible workspace reuse
+- Review scope counts before running commands such as `change-provider-all`
+- Real writes always create backups first
+- Dangerous history rewrites must go through: plan, in-chat approval, then apply
 
-## 参考文档
+## References
 
 - [SKILL.md](./SKILL.md)
 - [references/commands.md](./references/commands.md)
