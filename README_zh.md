@@ -14,7 +14,7 @@
 直接在仓库目录使用：
 
 ```bash
-./codex-history-manager --help
+python3 scripts/codex_history_manager.py --help
 ```
 
 安装成系统命令：

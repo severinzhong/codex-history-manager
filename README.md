@@ -32,7 +32,7 @@ flowchart TD
 Run directly from the repository:
 
 ```bash
-./codex-history-manager --help
+python3 scripts/codex_history_manager.py --help
 ```
 
 Install as a system command:

@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Manage local Codex history: search, export, migrate, clone, rebind provider, and perform guarded history rewrites."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = { text = "MIT" }
 authors = [
   { name = "Zhong" }
 ]
