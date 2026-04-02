@@ -7,6 +7,28 @@
 - `state_5.sqlite`：thread 元数据
 - `sessions/.../rollout-*.jsonl` 和 `archived_sessions/...`：会话事件流
 
+## 安装
+
+直接在仓库目录使用：
+
+```bash
+./codex-history-manager --help
+```
+
+安装成系统命令：
+
+```bash
+python3 -m pip install .
+codex-history-manager --help
+```
+
+或者用 `pipx`：
+
+```bash
+pipx install .
+codex-history-manager --help
+```
+
 ## 能做什么
 
 - 搜索历史 thread
