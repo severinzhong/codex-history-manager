@@ -11,6 +11,11 @@ It operates on two local Codex data stores:
 - `~/.codex/state_5.sqlite` for thread metadata
 - `~/.codex/sessions/.../rollout-*.jsonl` and `~/.codex/archived_sessions/...` for event logs
 
+## Compatibility
+
+- The CLI is designed to stay resilient to additive metadata columns in the local `threads` SQLite table, so newer Codex releases can add fields without breaking common commands such as `search`.
+- Prefer the repository CLI or a freshly installed package over ad-hoc SQLite edits when local Codex metadata evolves.
+
 ## Workflow
 
 ```mermaid

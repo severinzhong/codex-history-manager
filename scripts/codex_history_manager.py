@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime as dt
+import functools
 import hashlib
 import json
 import re
@@ -18,6 +19,27 @@ from typing import Any, Callable, Iterable, Iterator
 
 
 VISIBLE_MESSAGE_TYPES = {"user_message", "agent_message"}
+# Newer Codex releases (Desktop/CLI 0.5x+, observed in 0.152.0) no longer emit
+# event_msg user_message/agent_message records. Visible conversation text lives in
+# response_item records with payload.type == "message" instead.
+RESPONSE_ITEM_MESSAGE_TYPE = "message"
+RESPONSE_ITEM_VISIBLE_ROLES = {"user", "assistant"}
+# Kinds used by host-injected user-role messages (environment context, AGENTS.md,
+# turn_aborted notices). Real user input is reported as "user.text".
+USER_CONTENT_KIND_PREFIX = "user."
+INJECTED_CONTENT_PREFIXES = (
+    "<environment_context>",
+    "<user_instructions>",
+    "<turn_aborted>",
+    "<app-context>",
+    "<model_switch>",
+    "<skill_context>",
+    "# AGENTS.md instructions",
+)
+ROLLOUT_FILE_GLOB = "rollout-*.jsonl"
+ROLLOUT_NAME_PATTERN = re.compile(
+    r"^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(?P<thread>[0-9a-fA-F-]{36})(?:_[0-9a-fA-F-]{36})?\.jsonl$"
+)
 DEFAULT_BACKUP_ROOT = Path(__file__).resolve().parents[1] / "backups"
 
 
@@ -51,7 +73,9 @@ class ThreadRecord:
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "ThreadRecord":
-        payload = dict(row)
+        payload = {
+            key: value for key, value in dict(row).items() if key in THREAD_RECORD_FIELD_NAMES
+        }
         payload["rollout_path"] = Path(payload["rollout_path"])
         return cls(**payload)
 
@@ -67,6 +91,7 @@ class TranscriptMessage:
     role: str
     text: str
     phase: str | None = None
+    message_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -99,6 +124,9 @@ class DangerousEditChange:
 
 class CodexHistoryError(RuntimeError):
     pass
+
+
+THREAD_RECORD_FIELD_NAMES = frozenset(field.name for field in dataclasses.fields(ThreadRecord))
 
 
 def parse_args() -> argparse.Namespace:
@@ -327,30 +355,146 @@ def iter_rollout_records(path: Path) -> Iterator[dict[str, Any]]:
                 raise CodexHistoryError(f"Invalid JSON in {path}:{line_no}: {exc}") from exc
 
 
+def message_text_from_content(content: Any) -> str | None:
+    """Extract visible text from a response_item message content list."""
+    if not isinstance(content, list):
+        return None
+    parts: list[str] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") not in {"input_text", "output_text"}:
+            continue
+        text = item.get("text")
+        if isinstance(text, str):
+            parts.append(text)
+    if not parts:
+        return None
+    return "\n".join(parts)
+
+
+def is_visible_user_message(payload: dict[str, Any], text: str) -> bool:
+    """Filter out host-injected user-role records (env context, AGENTS.md, aborts)."""
+    metadata = payload.get("internal_chat_message_metadata_passthrough")
+    if isinstance(metadata, dict):
+        kinds = metadata.get("content_item_kinds")
+        if isinstance(kinds, list) and kinds:
+            return all(
+                isinstance(kind, str) and kind.startswith(USER_CONTENT_KIND_PREFIX)
+                for kind in kinds
+            )
+    stripped = text.lstrip()
+    return not stripped.startswith(INJECTED_CONTENT_PREFIXES)
+
+
 def visible_transcript(path: Path) -> list[TranscriptMessage]:
+    """Parse visible user/assistant messages from one rollout file.
+
+    Supports both the legacy event_msg records (user_message/agent_message) and the
+    current response_item records (payload.type == "message").
+    """
     messages: list[TranscriptMessage] = []
     for record in iter_rollout_records(path):
-        if record.get("type") != "event_msg":
-            continue
+        record_type = record.get("type")
         payload = record.get("payload")
         if not isinstance(payload, dict):
             continue
-        message_type = payload.get("type")
-        if message_type not in VISIBLE_MESSAGE_TYPES:
-            continue
-        text = payload.get("message")
-        if not isinstance(text, str):
-            continue
-        role = "assistant" if message_type == "agent_message" else "user"
-        phase = payload.get("phase") if isinstance(payload.get("phase"), str) else None
-        messages.append(
-            TranscriptMessage(
-                timestamp=str(record.get("timestamp", "")),
-                role=role,
-                text=text.rstrip(),
-                phase=phase,
+        if record_type == "event_msg":
+            message_type = payload.get("type")
+            if message_type not in VISIBLE_MESSAGE_TYPES:
+                continue
+            text = payload.get("message")
+            if not isinstance(text, str):
+                continue
+            role = "assistant" if message_type == "agent_message" else "user"
+            phase = payload.get("phase") if isinstance(payload.get("phase"), str) else None
+            messages.append(
+                TranscriptMessage(
+                    timestamp=str(record.get("timestamp", "")),
+                    role=role,
+                    text=text.rstrip(),
+                    phase=phase,
+                )
             )
-        )
+        elif record_type == "response_item":
+            if payload.get("type") != RESPONSE_ITEM_MESSAGE_TYPE:
+                continue
+            role = payload.get("role")
+            if role not in RESPONSE_ITEM_VISIBLE_ROLES:
+                continue
+            text = message_text_from_content(payload.get("content"))
+            if text is None:
+                continue
+            if role == "user" and not is_visible_user_message(payload, text):
+                continue
+            phase = payload.get("phase") if isinstance(payload.get("phase"), str) else None
+            message_id = payload.get("id") if isinstance(payload.get("id"), str) else None
+            messages.append(
+                TranscriptMessage(
+                    timestamp=str(record.get("timestamp", "")),
+                    role=str(role),
+                    text=text.rstrip(),
+                    phase=phase,
+                    message_id=message_id,
+                )
+            )
+    return messages
+
+
+def thread_id_from_rollout_name(name: str) -> str | None:
+    match = ROLLOUT_NAME_PATTERN.match(name)
+    if not match:
+        return None
+    return match.group("thread").lower()
+
+
+@functools.lru_cache(maxsize=None)
+def rollout_index(codex_home: str) -> dict[str, list[Path]]:
+    """Index every rollout file by thread id, sorted by the timestamp in the name.
+
+    A thread that went through compaction continues in a new rollout file, so the
+    full transcript spans multiple files. The index is process-local and read-only.
+    """
+    index: dict[str, list[Path]] = {}
+    for root_name in ("sessions", "archived_sessions"):
+        root = Path(codex_home) / root_name
+        if not root.is_dir():
+            continue
+        for path in root.rglob(ROLLOUT_FILE_GLOB):
+            thread_id = thread_id_from_rollout_name(path.name)
+            if thread_id is None:
+                continue
+            index.setdefault(thread_id, []).append(path)
+    for paths in index.values():
+        paths.sort(key=lambda path: path.name)
+    return index
+
+
+def thread_rollout_paths(codex_home: Path, thread: ThreadRecord) -> list[Path]:
+    paths = list(rollout_index(str(codex_home)).get(thread.id, []))
+    if str(thread.rollout_path) not in {str(path) for path in paths} and thread.rollout_path.exists():
+        paths.append(thread.rollout_path)
+        paths.sort(key=lambda path: path.name)
+    return paths
+
+
+def thread_transcript(codex_home: Path, thread: ThreadRecord) -> list[TranscriptMessage]:
+    """Concatenate the visible transcript across all rollout files of a thread."""
+    messages: list[TranscriptMessage] = []
+    seen_ids: set[str] = set()
+    seen_fallback: set[tuple[str, str, str]] = set()
+    for path in thread_rollout_paths(codex_home, thread):
+        for message in visible_transcript(path):
+            if message.message_id is not None:
+                if message.message_id in seen_ids:
+                    continue
+                seen_ids.add(message.message_id)
+            else:
+                key = (message.timestamp, message.role, message.text)
+                if key in seen_fallback:
+                    continue
+                seen_fallback.add(key)
+            messages.append(message)
     return messages
 
 
@@ -362,11 +506,11 @@ def load_session_meta(path: Path) -> dict[str, Any] | None:
     return None
 
 
-def load_thread_data(thread: ThreadRecord) -> ThreadData:
+def load_thread_data(codex_home: Path, thread: ThreadRecord) -> ThreadData:
     return ThreadData(
         thread=thread,
         session_meta=load_session_meta(thread.rollout_path),
-        transcript=visible_transcript(thread.rollout_path),
+        transcript=thread_transcript(codex_home, thread),
     )
 
 
@@ -421,12 +565,12 @@ def command_search(args: argparse.Namespace) -> int:
     for thread in candidates:
         transcript: list[TranscriptMessage] = []
         if query:
-            transcript = visible_transcript(thread.rollout_path)
+            transcript = thread_transcript(codex_home, thread)
         matched, matched_fields = matches_query(thread, transcript, query)
         if not matched:
             continue
         if not transcript:
-            transcript = visible_transcript(thread.rollout_path)
+            transcript = thread_transcript(codex_home, thread)
         latest_message = transcript[-1].text if transcript else thread.first_user_message
         results.append(
             {
@@ -489,10 +633,10 @@ def render_thread_text(data: ThreadData, max_messages: int) -> str:
 
 
 def command_show_thread(args: argparse.Namespace) -> int:
-    _, db_path = ensure_codex_home(args.codex_home)
+    codex_home, db_path = ensure_codex_home(args.codex_home)
     with connect_db(db_path) as conn:
         thread = fetch_thread(conn, args.id)
-    data = load_thread_data(thread)
+    data = load_thread_data(codex_home, thread)
     if args.json:
         print(json.dumps(data.to_dict(), ensure_ascii=False, indent=2))
     else:
@@ -532,10 +676,10 @@ def write_text(path: Path, text: str) -> None:
 
 
 def command_export_thread(args: argparse.Namespace) -> int:
-    _, db_path = ensure_codex_home(args.codex_home)
+    codex_home, db_path = ensure_codex_home(args.codex_home)
     with connect_db(db_path) as conn:
         thread = fetch_thread(conn, args.id)
-    data = load_thread_data(thread)
+    data = load_thread_data(codex_home, thread)
     output_path = args.output.expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -610,10 +754,10 @@ def render_handoff(data: ThreadData, recent_messages: int) -> str:
 
 
 def command_handoff(args: argparse.Namespace) -> int:
-    _, db_path = ensure_codex_home(args.codex_home)
+    codex_home, db_path = ensure_codex_home(args.codex_home)
     with connect_db(db_path) as conn:
         thread = fetch_thread(conn, args.id)
-    data = load_thread_data(thread)
+    data = load_thread_data(codex_home, thread)
     write_text(args.output, render_handoff(data, recent_messages=args.recent_messages))
     print(f"Wrote handoff to {args.output.expanduser().resolve()}")
     return 0

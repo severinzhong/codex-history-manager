@@ -9,6 +9,11 @@
 - `state_5.sqlite`：thread 元数据
 - `sessions/.../rollout-*.jsonl` 和 `archived_sessions/...`：会话事件流
 
+## 兼容性
+
+- CLI 默认会兼容 `threads` SQLite 表里新增但未使用的 metadata 列，避免 Codex 升级后像 `search` 这样的常用命令因为加列而失效。
+- 当本地 Codex 元数据结构发生变化时，优先更新仓库里的 CLI 或重新安装包，而不是手工改 SQLite。
+
 ## 安装
 
 直接在仓库目录使用：

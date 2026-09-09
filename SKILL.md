@@ -16,6 +16,8 @@ The bundled CLI is the source of truth for reading and mutating that state:
 
 - `./codex-history-manager ...`
 
+The CLI is expected to stay forward-compatible with additive metadata columns in the local Codex SQLite schema. If a command starts failing after a Codex upgrade, update this skill's bundled CLI before attempting manual database workarounds.
+
 ## Default workflow
 
 1. For discovery, start with `search`.
