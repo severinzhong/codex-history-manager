@@ -104,6 +104,16 @@ codex-history-manager --help
 
 ### Provider Rebinding
 
+Use `--from-provider` and `--to-provider` to migrate every thread currently assigned to one provider. Review the exact scope before applying:
+
+```bash
+./codex-history-manager --backup-root /volume/with/space migrate-provider --from-provider openai1 --to-provider openai --dry-run
+./codex-history-manager --backup-root /volume/with/space migrate-provider --from-provider openai1 --to-provider openai --apply
+./codex-history-manager --backup-root /volume/with/space migrate-provider --from-provider openai --to-provider openai1 --dry-run
+```
+
+This updates the matching SQLite rows and every associated rollout file while preserving thread recency and message bodies. The reverse command selects all current `openai` threads, including those originally created under the official provider. The target provider must be configured in Codex for the threads to open.
+
 ```bash
 ./codex-history-manager change-provider --id <thread-id> --provider openai1 --dry-run
 ./codex-history-manager change-provider-workspace --cwd /abs/path --provider anthropic --dry-run

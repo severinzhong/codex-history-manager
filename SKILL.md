@@ -16,7 +16,7 @@ The bundled CLI is the source of truth for reading and mutating that state:
 
 - `./codex-history-manager ...`
 
-The CLI is expected to stay forward-compatible with additive metadata columns in the local Codex SQLite schema. If a command starts failing after a Codex upgrade, update this skill's bundled CLI before attempting manual database workarounds.
+The CLI supports additive metadata columns and current `response_item` messages. Reading, exporting, handing off, and `migrate-provider` cover threads spanning multiple rollout files. Other write commands still target the latest rollout file; check for older segments before using them on a compacted thread.
 
 ## Default workflow
 
@@ -26,6 +26,19 @@ The CLI is expected to stay forward-compatible with additive metadata columns in
 4. For cross-workspace reuse, prefer `clone-thread` over `move-thread`.
 5. For writes, run a dry run first, then rerun with `--apply`.
 6. For history body rewrites, always do `plan-dangerous-edit`, show the warning and change list to the user, get explicit approval in chat, then run `apply-dangerous-edit`.
+
+## Migrating between providers
+
+Use `migrate-provider` to move every local thread whose current provider matches `--from-provider` to `--to-provider`. The command changes provider metadata in SQLite and every rollout file for matching threads, including files created after compaction. It preserves timestamps, model names, and conversation content.
+
+1. Run `./codex-history-manager migrate-provider --from-provider <source-id> --to-provider <target-id> --dry-run`.
+2. Review the thread count, rollout count, active-writer check, and available backup space. Set `--backup-root /path/with/enough/space` when the default volume is too small.
+3. Run the same command with `--apply`. The CLI holds thread writer locks, checks the rollout records, and creates a SQLite snapshot and rollout archive before changing metadata.
+4. Have the user verify representative threads in Codex and check that no source-provider rows remain. The target provider must be configured in Codex for migrated threads to open.
+
+For a full reverse migration, `--from-provider openai --to-provider openai1` selects **all** current `openai` threads, including threads that were originally official. It does not restore their previous individual provider assignments.
+
+Read [references/safety.md](references/safety.md) before a bulk migration.
 
 ## Core commands
 
@@ -53,11 +66,16 @@ The CLI is expected to stay forward-compatible with additive metadata columns in
   `./codex-history-manager change-provider-workspace --cwd /abs/path --provider openai1 --dry-run`
 - Rebind provider metadata for all local threads:
   `./codex-history-manager change-provider-all --provider openai1 --dry-run`
+- Migrate all threads currently assigned to one provider:
+  `./codex-history-manager migrate-provider --from-provider openai1 --to-provider openai --dry-run`
+- Migrate all current official-provider threads to a custom provider:
+  `./codex-history-manager migrate-provider --from-provider openai --to-provider openai1 --dry-run`
 
 ## Safety rules
 
 - Never perform a write first. Use the default dry run or pass `--dry-run`.
 - Only use `--apply` after reviewing the plan.
+- For bulk provider changes, use `migrate-provider` with `--from-provider`; `change-provider-all` includes every local thread.
 - Prefer cloning over moving unless the user explicitly wants to change ownership.
 - Do not hand edit `state_5.sqlite` or rollout files if the CLI can do the job.
 - If the user asks to modify message content, stop and confirm. You must first produce a dangerous edit plan, present the warning and change list in the conversation, and wait for explicit user approval before running `apply-dangerous-edit`.

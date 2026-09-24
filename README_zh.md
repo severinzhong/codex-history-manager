@@ -86,6 +86,16 @@ codex-history-manager --help
 
 ### provider 切换
 
+用 `--from-provider` 和 `--to-provider` 迁移当前属于某个 provider 的全部本地 Codex 历史。先核对范围，再执行：
+
+```bash
+./codex-history-manager --backup-root /有足够空间的路径 migrate-provider --from-provider openai1 --to-provider openai --dry-run
+./codex-history-manager --backup-root /有足够空间的路径 migrate-provider --from-provider openai1 --to-provider openai --apply
+./codex-history-manager --backup-root /有足够空间的路径 migrate-provider --from-provider openai --to-provider openai1 --dry-run
+```
+
+这会更新匹配 thread 的 SQLite 元数据及其全部 rollout 文件，并保留历史时间与消息内容。反向命令会选中当前所有 `openai` 会话，包括原本就在官方下创建的会话。目标 provider 需要已在 Codex 中配置，迁移后才能打开。
+
 ```bash
 ./codex-history-manager change-provider --id <thread-id> --provider openai1 --dry-run
 ./codex-history-manager change-provider-workspace --cwd /abs/path --provider anthropic --dry-run

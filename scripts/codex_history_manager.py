@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack, contextmanager
 import dataclasses
 import datetime as dt
 import functools
+import fcntl
 import hashlib
 import json
 import re
@@ -261,6 +263,14 @@ def parse_args() -> argparse.Namespace:
     provider_all.add_argument("--model", help="Optional model name to set on every thread.")
     add_write_flags(provider_all)
 
+    migrate_provider = subparsers.add_parser(
+        "migrate-provider",
+        help="Move all local threads from one provider id to another provider id.",
+    )
+    migrate_provider.add_argument("--from-provider", required=True, help="Existing provider id to migrate.")
+    migrate_provider.add_argument("--to-provider", required=True, help="Target provider id.")
+    add_write_flags(migrate_provider)
+
     return parser.parse_args()
 
 
@@ -472,7 +482,7 @@ def rollout_index(codex_home: str) -> dict[str, list[Path]]:
 
 def thread_rollout_paths(codex_home: Path, thread: ThreadRecord) -> list[Path]:
     paths = list(rollout_index(str(codex_home)).get(thread.id, []))
-    if str(thread.rollout_path) not in {str(path) for path in paths} and thread.rollout_path.exists():
+    if thread.rollout_path.exists() and thread.rollout_path.resolve() not in {path.resolve() for path in paths}:
         paths.append(thread.rollout_path)
         paths.sort(key=lambda path: path.name)
     return paths
@@ -972,7 +982,13 @@ def backup_dir(backup_root: Path, label: str) -> Path:
 
 def backup_database(db_path: Path, target_dir: Path) -> Path:
     destination = target_dir / "state_5.before.sqlite"
-    shutil.copy2(db_path, destination)
+    source = sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)
+    target = sqlite3.connect(destination)
+    try:
+        source.backup(target)
+    finally:
+        source.close()
+        target.close()
     return destination
 
 
@@ -1019,9 +1035,12 @@ def rewrite_jsonl_file(
 def replace_in_place(path: Path, transform: Callable[[dict[str, Any]], dict[str, Any] | None]) -> int:
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=path.parent) as temp_file:
         temp_path = Path(temp_file.name)
-    changed = rewrite_jsonl_file(path, temp_path, transform)
-    temp_path.replace(path)
-    return changed
+    try:
+        changed = rewrite_jsonl_file(path, temp_path, transform)
+        temp_path.replace(path)
+        return changed
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def validate_target_cwd(value: str) -> str:
@@ -1398,6 +1417,150 @@ def command_change_provider_all(args: argparse.Namespace) -> int:
     return 0
 
 
+def provider_migration_paths(
+    codex_home: Path,
+    threads: list[ThreadRecord],
+    source_provider: str,
+    target_provider: str,
+) -> list[Path]:
+    """Find and validate every rollout belonging to selected provider threads."""
+    paths: dict[str, Path] = {}
+    for thread in threads:
+        if not thread.rollout_path.is_file():
+            raise CodexHistoryError(f"Missing current rollout for thread {thread.id}: {thread.rollout_path}")
+        for path in thread_rollout_paths(codex_home, thread):
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    record = json.loads(next(line for line in handle if line.strip()))
+            except (OSError, StopIteration, json.JSONDecodeError) as exc:
+                raise CodexHistoryError(f"Cannot read session metadata from {path}: {exc}") from exc
+            payload = record.get("payload") if isinstance(record, dict) else None
+            if not isinstance(record, dict) or record.get("type") != "session_meta" or not isinstance(payload, dict):
+                raise CodexHistoryError(f"Missing session metadata in {path}")
+            if payload.get("id") != thread.id:
+                raise CodexHistoryError(f"Session id does not match thread {thread.id}: {path}")
+            provider = payload.get("model_provider")
+            if provider not in (None, source_provider, target_provider):
+                raise CodexHistoryError(f"Unexpected provider {provider!r} in {path}")
+            paths[str(path)] = path
+    return sorted(paths.values())
+
+
+@contextmanager
+def hold_thread_writer_locks(codex_home: Path, threads: list[ThreadRecord]) -> Iterator[None]:
+    """Exclude Codex writers throughout backup, rewrite, and database commit."""
+    lock_dir = codex_home / "thread-writer-locks"
+    lock_dir.mkdir(exist_ok=True)
+    created: list[Path] = []
+    with ExitStack() as stack:
+        try:
+            for thread in sorted(threads, key=lambda item: item.id):
+                path = lock_dir / f"{thread.id}.lock"
+                if path.exists():
+                    raise CodexHistoryError(f"Thread {thread.id} has a writer lock: {path}")
+                try:
+                    handle = path.open("x+b")
+                except FileExistsError as exc:
+                    raise CodexHistoryError(f"Thread {thread.id} has a writer lock: {path}") from exc
+                created.append(path)
+                stack.enter_context(handle)
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError as exc:
+                    raise CodexHistoryError(f"Cannot lock thread {thread.id}: {exc}") from exc
+            yield
+        finally:
+            for path in created:
+                path.unlink(missing_ok=True)
+
+
+def validate_rollout_jsonl(paths: list[Path]) -> None:
+    """Reject corrupt history before changing the first rollout."""
+    for path in paths:
+        with path.open("rb") as source:
+            for line_no, raw_line in enumerate(source, start=1):
+                try:
+                    json.loads(raw_line)
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise CodexHistoryError(f"Invalid JSON in {path}:{line_no}: {exc}") from exc
+
+
+def rewrite_session_provider(path: Path, provider: str) -> int:
+    """Change only the session metadata line; copy every later byte unchanged."""
+    with tempfile.NamedTemporaryFile("wb", delete=False, dir=path.parent) as target:
+        temp_path = Path(target.name)
+        try:
+            with path.open("rb") as source:
+                first_line = source.readline()
+                record = json.loads(first_line)
+                payload = record["payload"]
+                if payload.get("model_provider") == provider:
+                    return 0
+                payload["model_provider"] = provider
+                target.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n")
+                shutil.copyfileobj(source, target, length=1024 * 1024)
+            shutil.copymode(path, temp_path)
+            temp_path.replace(path)
+            return 1
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+
+def command_migrate_provider(args: argparse.Namespace) -> int:
+    codex_home, db_path = ensure_codex_home(args.codex_home)
+    if not args.from_provider.strip() or not args.to_provider.strip():
+        raise CodexHistoryError("Source and target provider ids must not be empty.")
+    if args.from_provider == args.to_provider:
+        raise CodexHistoryError("Source and target providers are the same.")
+
+    with connect_db(db_path) as conn:
+        threads = fetch_threads(conn, provider=args.from_provider)
+    if not threads:
+        print(f"No threads use provider {args.from_provider}; nothing to migrate.")
+        return 0
+
+    rollout_paths = provider_migration_paths(codex_home, threads, args.from_provider, args.to_provider)
+    bytes_total = sum(path.stat().st_size for path in rollout_paths)
+    print(f"Plan: migrate provider {args.from_provider} -> {args.to_provider}")
+    print(f"  scope: {len(threads)} threads across {len(rollout_paths)} rollout files ({bytes_total} bytes)")
+    if not should_apply(args):
+        print("Dry run only. Re-run with --apply to perform the migration.")
+        return 0
+
+    with hold_thread_writer_locks(codex_home, threads):
+        print("Validating rollout records before mutation.", flush=True)
+        validate_rollout_jsonl(rollout_paths)
+        backup_root = backup_dir(args.backup_root, f"migrate-provider-{args.from_provider}-to-{args.to_provider}")
+        print(f"Creating backup: {backup_root}", flush=True)
+        backup_database(db_path, backup_root)
+        backup_rollouts(codex_home, rollout_paths, backup_root)
+        print("Backup complete; updating rollout metadata.", flush=True)
+
+        changed_records = 0
+        try:
+            for index, path in enumerate(rollout_paths, start=1):
+                changed_records += rewrite_session_provider(path, args.to_provider)
+                if index % 100 == 0 or index == len(rollout_paths):
+                    print(f"  updated {index}/{len(rollout_paths)} rollout files", flush=True)
+
+            with connect_db(db_path) as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                before = conn.total_changes
+                conn.executemany(
+                    "UPDATE threads SET model_provider = ? WHERE id = ? AND model_provider = ?",
+                    [(args.to_provider, thread.id, args.from_provider) for thread in threads],
+                )
+                if conn.total_changes - before != len(threads):
+                    raise CodexHistoryError("Thread provider changed during migration; rerun after checking the backup.")
+                conn.commit()
+        except Exception as exc:
+            raise CodexHistoryError(f"Provider migration stopped. Backup: {backup_root}. Cause: {exc}") from exc
+
+    print(f"Migrated {len(threads)} threads. Backup: {backup_root}")
+    print(f"Updated session metadata records: {changed_records}")
+    return 0
+
+
 def dispatch(args: argparse.Namespace) -> int:
     command = args.command
     if command == "search":
@@ -1426,6 +1589,8 @@ def dispatch(args: argparse.Namespace) -> int:
         return command_change_provider_workspace(args)
     if command == "change-provider-all":
         return command_change_provider_all(args)
+    if command == "migrate-provider":
+        return command_migrate_provider(args)
     raise CodexHistoryError(f"Unsupported command: {command}")
 
 

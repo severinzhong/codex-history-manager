@@ -20,6 +20,7 @@ Important columns:
 - `archived`
 - `created_at`
 - `updated_at`
+- `history_mode` (recent Codex releases may mark threads as `paginated`)
 
 ## Rollout JSONL
 
@@ -61,3 +62,4 @@ conversation and must not be treated as transcript messages.
 - `payload.model`
 
 For workspace migration or provider rebinding, keep SQLite and rollout metadata in sync.
+The built-in OpenAI provider id is `openai`; older local rows can retain a provider id that is no longer defined in Codex configuration. Such rows may appear in history but fail to resume. A provider migration must update both `threads.model_provider` and `session_meta.payload.model_provider` in every rollout belonging to each selected thread.

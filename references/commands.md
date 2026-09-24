@@ -67,6 +67,22 @@ Workflow:
 
 ## Provider reassignment
 
+Migrate every local Codex thread currently assigned to a specified provider. The command covers every rollout file for each thread and preserves recency timestamps:
+
+```bash
+./codex-history-manager --backup-root /volume/with/space migrate-provider --from-provider openai1 --to-provider openai --dry-run
+./codex-history-manager --backup-root /volume/with/space migrate-provider --from-provider openai1 --to-provider openai --apply
+```
+
+The target can be any provider id configured in Codex. To move all current official-provider threads to `openai1`, reverse the parameters:
+
+```bash
+./codex-history-manager --backup-root /volume/with/space migrate-provider --from-provider openai --to-provider openai1 --dry-run
+./codex-history-manager --backup-root /volume/with/space migrate-provider --from-provider openai --to-provider openai1 --apply
+```
+
+The reverse command includes threads that were originally official. This changes local metadata; it does not import histories from another app or alter message bodies.
+
 ```bash
 ./codex-history-manager change-provider --id <thread-id> --provider openai1 --dry-run
 ./codex-history-manager change-provider --id <thread-id> --provider openai1 --apply

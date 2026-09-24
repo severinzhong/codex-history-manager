@@ -2,7 +2,7 @@
 
 - Write commands default to dry run unless `--apply` is present.
 - Every write command creates a timestamped backup directory under `backups/`.
-- Database backup: full copy of `~/.codex/state_5.sqlite`
+- Database backup: consistent SQLite snapshot of `~/.codex/state_5.sqlite`, including committed WAL data
 - Rollout backup: tarball with every affected rollout file plus a text manifest
 - The tool only mutates:
   - `threads.cwd`
@@ -16,6 +16,9 @@
 - Prefer `clone-thread` when the user wants the same history usable from two workspaces.
 - Prefer `clone-workspace` when the user wants the same history usable from two workspaces.
 - `change-provider-all` can touch every local rollout file. Dry-run it first and sanity check the scope count.
+- For bulk provider moves in either direction, use `migrate-provider --from-provider <id> --to-provider <id>`; it selects every thread currently assigned to the source provider, holds thread writer locks through backup and database commit, validates all records, and backs up every associated rollout file. Put `--backup-root` on a volume with enough capacity for the archive.
+- Moving `openai` to a custom provider selects all current `openai` threads, including ones that were originally official. Ensure the target provider is configured in Codex before applying.
+- `move-*`, `clone-*`, and `change-provider*` write only the latest rollout for each thread. Do not use them on a thread with older rollout segments until those commands are upgraded.
 - `apply-dangerous-edit` is the highest-risk command. It rewrites stored history content, not just metadata.
 - Before `apply-dangerous-edit`, the agent must present the plan warning and exact change list in the conversation and receive explicit user approval.
 - `apply-dangerous-edit` requires all of: a saved plan file, the exact `plan_id`, `--acknowledge-history-rewrite`, and `--apply`.
