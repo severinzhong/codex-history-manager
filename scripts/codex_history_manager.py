@@ -6,9 +6,9 @@ from contextlib import ExitStack, contextmanager
 import dataclasses
 import datetime as dt
 import functools
-import fcntl
 import hashlib
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -18,6 +18,34 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
+
+if os.name == "nt":
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class _OVERLAPPED(ctypes.Structure):
+        _fields_ = [
+            ("Internal", ctypes.c_void_p),
+            ("InternalHigh", ctypes.c_void_p),
+            ("Offset", wintypes.DWORD),
+            ("OffsetHigh", wintypes.DWORD),
+            ("hEvent", wintypes.HANDLE),
+        ]
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _lock_file_ex = _kernel32.LockFileEx
+    _lock_file_ex.argtypes = (
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(_OVERLAPPED),
+    )
+    _lock_file_ex.restype = wintypes.BOOL
+else:
+    import fcntl
 
 
 VISIBLE_MESSAGE_TYPES = {"user_message", "agent_message"}
@@ -139,7 +167,7 @@ def parse_args() -> argparse.Namespace:
         "--codex-home",
         type=Path,
         default=Path.home() / ".codex",
-        help="Codex home directory. Defaults to ~/.codex",
+        help="Codex home directory. Defaults to <home>/.codex",
     )
     parser.add_argument(
         "--backup-root",
@@ -1452,8 +1480,12 @@ def hold_thread_writer_locks(codex_home: Path, threads: list[ThreadRecord]) -> I
     lock_dir = codex_home / "thread-writer-locks"
     lock_dir.mkdir(exist_ok=True)
     created: list[Path] = []
-    with ExitStack() as stack:
-        try:
+    lock_regions: list[Any] = []
+    try:
+        with ExitStack() as stack:
+            coordination_path = lock_dir / ".coordination.lock"
+            coordination_handle = stack.enter_context(coordination_path.open("a+b"))
+            lock_regions.append(acquire_file_lock(coordination_handle, blocking=True))
             for thread in sorted(threads, key=lambda item: item.id):
                 path = lock_dir / f"{thread.id}.lock"
                 if path.exists():
@@ -1465,13 +1497,40 @@ def hold_thread_writer_locks(codex_home: Path, threads: list[ThreadRecord]) -> I
                 created.append(path)
                 stack.enter_context(handle)
                 try:
-                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    lock_regions.append(acquire_file_lock(handle, blocking=False))
                 except OSError as exc:
                     raise CodexHistoryError(f"Cannot lock thread {thread.id}: {exc}") from exc
+            # Codex uses the coordination lock only while acquiring or cleaning
+            # thread locks. Release it after our complete thread-lock set is held.
+            coordination_handle.close()
             yield
-        finally:
-            for path in created:
-                path.unlink(missing_ok=True)
+    finally:
+        # Windows does not allow deleting an open lock file. ExitStack closes
+        # all thread handles before control reaches this cleanup.
+        for path in created:
+            path.unlink(missing_ok=True)
+
+
+def acquire_file_lock(handle: Any, *, blocking: bool) -> Any:
+    """Acquire the same OS-level exclusive file lock used by Codex writers."""
+    if os.name == "nt":
+        overlapped = _OVERLAPPED()
+        flags = 0x00000002  # LOCKFILE_EXCLUSIVE_LOCK
+        if not blocking:
+            flags |= 0x00000001  # LOCKFILE_FAIL_IMMEDIATELY
+        handle_value = msvcrt.get_osfhandle(handle.fileno())
+        # Codex uses File::try_lock/File::lock on the same file. Locking the
+        # first byte conflicts with its whole-file exclusive lock.
+        if not _lock_file_ex(
+            wintypes.HANDLE(handle_value), flags, 0, 1, 0, ctypes.byref(overlapped)
+        ):
+            error = ctypes.get_last_error()
+            raise OSError(error, ctypes.FormatError(error))
+        return overlapped
+    else:
+        operation = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
+        fcntl.flock(handle.fileno(), operation)
+        return None
 
 
 def validate_rollout_jsonl(paths: list[Path]) -> None:
@@ -1487,9 +1546,10 @@ def validate_rollout_jsonl(paths: list[Path]) -> None:
 
 def rewrite_session_provider(path: Path, provider: str) -> int:
     """Change only the session metadata line; copy every later byte unchanged."""
-    with tempfile.NamedTemporaryFile("wb", delete=False, dir=path.parent) as target:
-        temp_path = Path(target.name)
-        try:
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("wb", delete=False, dir=path.parent) as target:
+            temp_path = Path(target.name)
             with path.open("rb") as source:
                 first_line = source.readline()
                 record = json.loads(first_line)
@@ -1499,10 +1559,11 @@ def rewrite_session_provider(path: Path, provider: str) -> int:
                 payload["model_provider"] = provider
                 target.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n")
                 shutil.copyfileobj(source, target, length=1024 * 1024)
-            shutil.copymode(path, temp_path)
-            temp_path.replace(path)
-            return 1
-        finally:
+        shutil.copymode(path, temp_path)
+        temp_path.replace(path)
+        return 1
+    finally:
+        if temp_path is not None:
             temp_path.unlink(missing_ok=True)
 
 

@@ -6,7 +6,7 @@
 
 `codex-history-manager` is a local-first skill and CLI for managing Codex history stored on disk. It can search, read, export, migrate, clone, rebind provider metadata, and perform guarded history rewrites under an explicit high-risk workflow.
 
-It operates on two local Codex data stores:
+It operates on two local Codex data stores (`~/.codex` on macOS/Linux and `%USERPROFILE%\.codex` on Windows, unless a custom Codex home is configured):
 
 - `~/.codex/state_5.sqlite` for thread metadata
 - `~/.codex/sessions/.../rollout-*.jsonl` and `~/.codex/archived_sessions/...` for event logs
@@ -53,6 +53,14 @@ Or use `pipx`:
 pipx install .
 codex-history-manager --help
 ```
+
+On Windows, use PowerShell with Python 3.9 or newer:
+
+```powershell
+py -3 .\scripts\codex_history_manager.py --help
+```
+
+When running from a cloned repository, the `codex-history-manager.cmd` launcher is also available.
 
 ## What It Can Do
 
@@ -110,6 +118,12 @@ Use `--from-provider` and `--to-provider` to migrate every thread currently assi
 ./codex-history-manager --backup-root /volume/with/space migrate-provider --from-provider openai1 --to-provider openai --dry-run
 ./codex-history-manager --backup-root /volume/with/space migrate-provider --from-provider openai1 --to-provider openai --apply
 ./codex-history-manager --backup-root /volume/with/space migrate-provider --from-provider openai --to-provider openai1 --dry-run
+```
+
+PowerShell example:
+
+```powershell
+py -3 .\scripts\codex_history_manager.py --backup-root "D:\CodexBackups" migrate-provider --from-provider openai1 --to-provider openai --dry-run
 ```
 
 This updates the matching SQLite rows and every associated rollout file while preserving thread recency and message bodies. The reverse command selects all current `openai` threads, including those originally created under the official provider. The target provider must be configured in Codex for the threads to open.

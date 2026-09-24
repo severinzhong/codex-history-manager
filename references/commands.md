@@ -83,6 +83,12 @@ The target can be any provider id configured in Codex. To move all current offic
 
 The reverse command includes threads that were originally official. This changes local metadata; it does not import histories from another app or alter message bodies.
 
+On Windows PowerShell, call the bundled script through the Python launcher:
+
+```powershell
+py -3 .\scripts\codex_history_manager.py --backup-root "D:\CodexBackups" migrate-provider --from-provider openai1 --to-provider openai --dry-run
+```
+
 ```bash
 ./codex-history-manager change-provider --id <thread-id> --provider openai1 --dry-run
 ./codex-history-manager change-provider --id <thread-id> --provider openai1 --apply

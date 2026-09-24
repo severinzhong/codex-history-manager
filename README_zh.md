@@ -4,7 +4,7 @@
 
 `codex-history-manager` 是一个面向本地 Codex 历史记录的技能和 CLI 工具，用来搜索、读取、导出、迁移、克隆、改 provider，以及在严格确认流程下修改历史内容。
 
-它操作的是本机 `~/.codex` 下的两类数据：
+它操作本机 Codex 数据目录下的两类数据：macOS/Linux 默认是 `~/.codex`，Windows 默认是 `%USERPROFILE%\.codex`，也可以通过 `--codex-home` 指定目录。
 
 - `state_5.sqlite`：thread 元数据
 - `sessions/.../rollout-*.jsonl` 和 `archived_sessions/...`：会话事件流
@@ -35,6 +35,14 @@ codex-history-manager --help
 pipx install .
 codex-history-manager --help
 ```
+
+Windows 上请使用 PowerShell 和 Python 3.9 或更新版本：
+
+```powershell
+py -3 .\scripts\codex_history_manager.py --help
+```
+
+从仓库克隆后，也可以使用 `codex-history-manager.cmd` 启动器。
 
 ## 能做什么
 
@@ -92,6 +100,12 @@ codex-history-manager --help
 ./codex-history-manager --backup-root /有足够空间的路径 migrate-provider --from-provider openai1 --to-provider openai --dry-run
 ./codex-history-manager --backup-root /有足够空间的路径 migrate-provider --from-provider openai1 --to-provider openai --apply
 ./codex-history-manager --backup-root /有足够空间的路径 migrate-provider --from-provider openai --to-provider openai1 --dry-run
+```
+
+PowerShell 示例：
+
+```powershell
+py -3 .\scripts\codex_history_manager.py --backup-root "D:\CodexBackups" migrate-provider --from-provider openai1 --to-provider openai --dry-run
 ```
 
 这会更新匹配 thread 的 SQLite 元数据及其全部 rollout 文件，并保留历史时间与消息内容。反向命令会选中当前所有 `openai` 会话，包括原本就在官方下创建的会话。目标 provider 需要已在 Codex 中配置，迁移后才能打开。

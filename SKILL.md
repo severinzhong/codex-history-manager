@@ -7,7 +7,7 @@ description: Search, read, export, hand off, clone, move, or rebind local Codex 
 
 Use `codex-history-manager` when the task is about local Codex history, not general ChatGPT or web chat history.
 
-Codex stores local history in two places:
+Codex stores local history in two places (`~/.codex` on macOS/Linux, `%USERPROFILE%\.codex` on Windows, unless `--codex-home` is set):
 
 - `~/.codex/state_5.sqlite` for thread metadata
 - `~/.codex/sessions/.../rollout-*.jsonl` and `~/.codex/archived_sessions/...` for event logs
@@ -15,6 +15,7 @@ Codex stores local history in two places:
 The bundled CLI is the source of truth for reading and mutating that state:
 
 - `./codex-history-manager ...`
+- On Windows, run `py -3 <skill-folder>\scripts\codex_history_manager.py ...` or use the repository's `codex-history-manager.cmd` launcher.
 
 The CLI supports additive metadata columns and current `response_item` messages. Reading, exporting, handing off, and `migrate-provider` cover threads spanning multiple rollout files. Other write commands still target the latest rollout file; check for older segments before using them on a compacted thread.
 
@@ -35,6 +36,8 @@ Use `migrate-provider` to move every local thread whose current provider matches
 2. Review the thread count, rollout count, active-writer check, and available backup space. Set `--backup-root /path/with/enough/space` when the default volume is too small.
 3. Run the same command with `--apply`. The CLI holds thread writer locks, checks the rollout records, and creates a SQLite snapshot and rollout archive before changing metadata.
 4. Have the user verify representative threads in Codex and check that no source-provider rows remain. The target provider must be configured in Codex for migrated threads to open.
+
+On Windows, replace `./codex-history-manager` in these commands with `py -3 <skill-folder>\scripts\codex_history_manager.py` (or the `.cmd` launcher when using a cloned repository). Close Codex before `--apply` so its session database and rollout files are not being written during migration.
 
 For a full reverse migration, `--from-provider openai --to-provider openai1` selects **all** current `openai` threads, including threads that were originally official. It does not restore their previous individual provider assignments.
 

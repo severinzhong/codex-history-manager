@@ -2,7 +2,7 @@
 
 ## SQLite
 
-`~/.codex/state_5.sqlite`
+`state_5.sqlite` under the Codex home (`~/.codex` on macOS/Linux, `%USERPROFILE%\.codex` on Windows)
 
 Important table:
 

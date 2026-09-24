@@ -2,7 +2,7 @@
 
 - Write commands default to dry run unless `--apply` is present.
 - Every write command creates a timestamped backup directory under `backups/`.
-- Database backup: consistent SQLite snapshot of `~/.codex/state_5.sqlite`, including committed WAL data
+- Database backup: consistent SQLite snapshot of `state_5.sqlite` under the Codex home, including committed WAL data
 - Rollout backup: tarball with every affected rollout file plus a text manifest
 - The tool only mutates:
   - `threads.cwd`
@@ -17,6 +17,8 @@
 - Prefer `clone-workspace` when the user wants the same history usable from two workspaces.
 - `change-provider-all` can touch every local rollout file. Dry-run it first and sanity check the scope count.
 - For bulk provider moves in either direction, use `migrate-provider --from-provider <id> --to-provider <id>`; it selects every thread currently assigned to the source provider, holds thread writer locks through backup and database commit, validates all records, and backs up every associated rollout file. Put `--backup-root` on a volume with enough capacity for the archive.
+- The migration lock uses the OS file-lock API used by Codex (POSIX `flock` or Windows `LockFileEx`) and holds the home coordination lock while acquiring all per-thread locks. On Windows, all lock handles are closed before their files are removed.
+- Close Codex before a bulk `--apply` migration, especially on Windows, so no session process keeps the database or rollout files open.
 - Moving `openai` to a custom provider selects all current `openai` threads, including ones that were originally official. Ensure the target provider is configured in Codex before applying.
 - `move-*`, `clone-*`, and `change-provider*` write only the latest rollout for each thread. Do not use them on a thread with older rollout segments until those commands are upgraded.
 - `apply-dangerous-edit` is the highest-risk command. It rewrites stored history content, not just metadata.
